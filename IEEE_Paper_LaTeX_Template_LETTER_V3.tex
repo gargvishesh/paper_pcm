@@ -214,7 +214,7 @@ The conventional quicksort algorithm uses a single pivot to divide the input dat
 
 \subsection{Multi-pivot sort}
 
-The intuition behind the multi-pivot sort algorithm is to extend the single-pivot idea to multiple pivots such that the partition between each consecutive pair of pivots can fit in DRAM. However, unlike the single pivot case, we now no longer have any prior information about the endpoints of all the partitions to facilitate direct movement of elements to their respective partitions. 
+The intuition behind the multi-pivot sort algorithm is to extend the single-pivot idea to multiple pivots such that the partition between each consecutive pair of pivots can fit in DRAM. However, unlike the single pivot case, we now no longer have any prior information about the endpoints of \textit{all} the partitions to facilitate direct movement of elements to their respective partitions. 
 
 We address this limitation by adding a separate \textit{read phase} that makes a single pass over the input elements counting the number of elements between each consecutive pair of pivots. This equips us with the endpoint information necessary for the following phases of the algorithm.
 
@@ -224,7 +224,7 @@ We now present an exposition of the various phases of the multi-pivot algorithm:
 In the read phase, we divide the input tuples into DRAM sized $p$ partitions s.t. $p = \frac{N_R L_R}{|DRAM|}$ by choosing $p-1$ random tuples as pivots. These pivots are then copied to a separate location and sorted. Subsequently, we scan through the tuples array counting the number of elements between each consecutive pair of pivots. This is accomplished by doing a binary search within the sorted list of pivots for each tuple in the array.
 
 \subsubsection{Swap phase} 
-The swap phase uses the information gathered in the read phase to groups the same partition tuples together. This is done be means of an algorithm similar to cycle-sort\cite{cycle_sort} in nature where each entry is directly written to its correct partition in-place. The writes during this phase cannot exceed $N_R L_R$ since in the worst case, each tuple would have to be moved to its correct partition.
+The swap phase uses the information gathered in the read phase to group the same partition tuples together. This is done be means of an algorithm similar to cycle-sort\cite{cycle_sort} in nature where each entry is directly written to its correct partition in-place. The writes during this phase cannot exceed $N_R L_R$ since in the worst case, each tuple would have to be moved to its correct partition.
 
 
 \subsubsection{Sort phase}
@@ -278,20 +278,25 @@ In this variant, we jettison the the swap phase of the multi-pivot sort. Instead
 
 Hash Join is another workhorse operator in database systems used most frequently among all join operators. The variants of Hash Join include Simple, Grace and Hybrid Join[]. In the case where smaller relation doesn't fit in memory, both the relations are partitioned and the join is performed on a pair of partitions at a time. A hash table is built on the smaller relation and larger relation tuples are used to probe for matching value(s) in the join column(s)    .
 
-During the progress of Hash Join, the parts of the algorithm that incur writes are the reading in of tuples, the writing out of join results and the building of the hash table. Since the reading in and the writing out process are indispensable, we focus our attention on minimising the writes for the hash table.
+During the progress of Hash Join, the parts of the algorithm that incur writes are the reading in of tuples, the writing out of join results and the building of the hash table. Since the reading in and the writing out processes are indispensable, we focus our attention on minimising the writes for the hash table.
 
-Each entry in a hash table consists of an RID and the hash value for the join columns. To save memory space wastage, typically a new entry sized space is allocated for each insertion in a bucket and connected to existing entries using a pointer. Such an approach incurs an additional pointer write each time a new entry is inserted.Besides, for each pair of partitions, a new hash table is constructed, clearing away the old entries. This clearing also creates writes.
+We discuss the conventional Hash Table construction followed by our optimisations in the next subsections. We assume $size_{entry}$ as the hash table entry size for each smaller relation tuple and $size_{ptr}$ as the size of the pointer.
 
-We propose the following optimisations for hash table to reduce the incurred writes.
+\subsection{Conventional Hash Table}
+Each entry in a hash table consists of an RID and the hash value for the join columns. To save memory space wastage, typically a new entry sized space is allocated for each insertion in a bucket and connected to existing entries using a pointer. Such an approach incurs an additional pointer write each time a new entry is inserted. Besides, for each pair of partitions, a new hash table is constructed, clearing away the old entries. This clearing also creates writes.
+
+\textbf{Write Analysis:} The writes would be $N_R \times (size_{entry} + size_{ptr})$ since each new entry connects to the previous entry in the bucket by means of a pointer.
 
 \subsection{Page based allocation}
-We allocate to buckets is done in units of pages. A page contains contiguous entries and is connected to another by means of pointers. Each time a bucket runs out of space, we allocate a new page to the bucket. Though such an approach  may lead to space wastage when some of the pages are not fully occupied, we save on valuable pointer writes which are incurred when the space is allocated on a per-entry basis.
+Allocation of space to buckets is done in units of \textit{pages}. A page contains contiguous entries and is connected to another page by means of a pointer. Each time a bucket runs out of space, we allocate a new page to the bucket. Though such an approach  may lead to space wastage when some of the pages are not fully occupied, we save on valuable pointer writes which are incurred when the space is allocated on a per-entry basis.
+
+\textbf{Write Analysis:} Assuming there are $T_p$ entries per page, there would be one pointer per $T_p$ entries. In such a case, the writes would be $N_R \times (size_{entry} + \frac{size_{ptr}}{T_p})$.
 
 \subsection{Bitmap based Hash Table} 
 
 We propose a bitmap based Hash Table that uses bit to indicate whether the entry in the table is occupied or free. Thus, whenever we need to clear away the older hash table to create a new one, we just reset these bits to indicate the same, saving the writes for re-setting to whole hash table instead. Also, as proposed in \cite{chen}, we store the difference between successive RIDs instead of the RID themselves.
 
-\subsection{Skipping hash value storage}
+\subsection{Avoiding hash value storage}
 We can avoid including the hash value in each entry and incur the penalty of reading the join field for each entry in the bucket. Apart from reducing the writes, this approach will also save the write time at the cost of additional read time. Assuming $B$ buckets and a uniform Hash Table distribution, there would be $\dfrac{N_R}{B}$ entries in each bucket. The time incurred for writing the hash values will be $\lambda R \times size_{hashfield}$. For each $S$ tuple, due to the absence of hash value field, we would need to read the join column value from PCM taking a time of $\dfrac{N_R}{B} \times R$. Hence, skipping to include the hash value field will be advantageous in terms of time as well if:\\ 
 \begin{equation}
 \begin{split}
@@ -360,7 +365,7 @@ Multi2sim\cite{multi2sim} is an open source application only simulator that can 
 
 We modified Multi2Sim's existing DRAM simulation to act as Phase Change Memory. A separate architecture controlled DRAM buffer was added as another \textit{inclusive} level in the memory hierarchy, in between the last level cache (L2) and the PCM. The DRAM was simulated as a set associative write-back memory with \textit{N-Chance} as the eviction policy. The timing simulation was modified to account for the asymmetric read and write times of PCM.
 
-Multi2Sim, like most other simulators, doesn't track the data residing at the different levels of the memory hierarchy. It instead maintains a single buffer that indicates the latest data as visible to the simulated program for each memory location. We added separate data tracking functionality for DRAM and PCM resident data. Since we follow a \textit{read-before-write} policy for DRAM eviction, this addition enabled us to read the original PCM resident data block and compare it with the evicted DRAM block accounting for just those writes where the data bits differed. We measure writes at the granularity of both \textit{bit} and \textit{word}. 
+Like most other simulators, Multi2Sim doesn't track the data residing at the different levels of the memory hierarchy. It instead maintains a single buffer that indicates the latest data as visible to the simulated program for each memory location. We added separate data tracking functionality for DRAM and PCM resident data. Since we follow a \textit{read-before-write} policy for DRAM eviction, this addition enabled us to read the original PCM resident data block and compare it with the evicted DRAM block accounting for just those writes where the data bits differed. We measure writes at the granularity of both \textit{bit} and \textit{word}. 
 
 A critical evaluation metric for algorithms for PCM is their wear distribution. Multi2sim code was instrumented to track this word level wear distribution information for algorithms.
 
