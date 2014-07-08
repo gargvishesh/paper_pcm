@@ -276,35 +276,40 @@ In this variant, we jettison the the swap phase of the multi-pivot sort. Instead
 \section{Hash Join}
 \label{hj}
 
-Hash Join is another workhorse operator in database systems used most frequently among all join operators. The variants of Hash Join include Simple, Grace and Hybrid Join[]. In the case where smaller relation doesn't fit in memory, both the relations are partitioned and the join is performed on a pair of partitions at a time. A hash table is built on the smaller relation and larger relation tuples are used to probe for matching value(s) in the join column(s)    .
+Hash Join is another workhorse operator in database systems used most frequently among all join operators. The variants of Hash Join include Simple, Grace and Hybrid Join. In the case where smaller relation doesn't fit in memory, both the relations are partitioned and the join is performed on a pair of partitions at a time. A hash table is built on the smaller relation and larger relation tuples are used to probe for matching value(s) in the join column(s)    .
 
 During the progress of Hash Join, the parts of the algorithm that incur writes are the reading in of tuples, the writing out of join results and the building of the hash table. Since the reading in and the writing out processes are indispensable, we focus our attention on minimising the writes for the hash table.
 
 We discuss the conventional Hash Table construction followed by our optimisations in the next subsections. We assume $size_{entry}$ as the hash table entry size for each smaller relation tuple and $size_{ptr}$ as the size of the pointer.
 
 \subsection{Conventional Hash Table}
-Each entry in a hash table consists of an RID and the hash value for the join columns. To save memory space wastage, typically a new entry sized space is allocated for each insertion in a bucket and connected to existing entries using a pointer. Such an approach incurs an additional pointer write each time a new entry is inserted. Besides, for each pair of partitions, a new hash table is constructed, clearing away the old entries. This clearing also creates writes.
+Each entry in a hash table consists of a pointer to the corresponding inner table tuple and the hash value for the join columns. To save memory space wastage, typically a separate entry sized space is allocated for each insertion in a bucket and connected to existing entries using an additional pointer. Such an approach incurs an additional pointer write each time a new entry is inserted. Besides, the hash table for each pair of partitions is constructed afresh after clearing away the old entries leading to another round of writes.
 
-\textbf{Write Analysis:} The writes would be $N_R \times (size_{entry} + size_{ptr})$ since each new entry connects to the previous entry in the bucket by means of a pointer.
+\textbf{Write Analysis:} The writes while hash table construction would be $N_R \times (size_{entry} + size_{ptr})$ since each new entry connects to the previous entry in the bucket by means of a pointer. There would be an equal number of writes during eventual hash table clearing for creation of hash table for the next pair of partitions, making a total of $2N_R \times (size_{entry} + size_{ptr})$
 
 \subsection{Page based allocation}
-Allocation of space to buckets is done in units of \textit{pages}. A page contains contiguous entries and is connected to another page by means of a pointer. Each time a bucket runs out of space, we allocate a new page to the bucket. Though such an approach  may lead to space wastage when some of the pages are not fully occupied, we save on valuable pointer writes which are incurred when the space is allocated on a per-entry basis.
+Allocation of space to buckets is done in units of \textit{pages}. A page contains a set of contiguous entries and is connected to another page by means of a pointer. Each time a bucket runs out of space, we allocate a new page to the bucket. Though such an approach  may lead to space wastage when some of the pages are not fully occupied, we save on valuable pointer writes which are incurred when the space is allocated on a per-entry basis.
 
-\textbf{Write Analysis:} Assuming there are $T_p$ entries per page, there would be one pointer per $T_p$ entries. In such a case, the writes would be $N_R \times (size_{entry} + \frac{size_{ptr}}{T_p})$.
+\textbf{Write Analysis:} Assuming there are $T_p$ entries per page, there would now be one pointer per $T_p$ entries. In such a case, the writes would be $2N_R \times (size_{entry} + \frac{size_{ptr}}{T_p})$.
 
-\subsection{Bitmap based Hash Table} 
+\subsection{Bitmapped Hash Table} 
 
-We propose a bitmap based Hash Table that uses bit to indicate whether the entry in the table is occupied or free. Thus, whenever we need to clear away the older hash table to create a new one, we just reset these bits to indicate the same, saving the writes for re-setting to whole hash table instead. Also, as proposed in \cite{chen}, we store the difference between successive RIDs instead of the RID themselves.
+We propose a bitmap based Hash Table that uses a bit to indicate whether the entry in the table is vacant or occupied. Thus, whenever we need to clear away the older hash table to create a new one, we just reset these bits to indicate the same, saving the writes for reset of the entire hash table instead.
+
+\textbf{Write Analysis:} In this case, we would avoid full entry clearing writes of $N_R \times size_{entry}$ during hash table reset by replacing it with single bit reset writes of $N_R \times 1$. The writes due to inter-page pointers reset however will still remain as we need to go about freeing the page list for the next round. Thus the total writes would now be $N_R \times (1 + size_{entry} + 2 \times \frac{size_{ptr}}{T_p})$.
+
 
 \subsection{Avoiding hash value storage}
-We can avoid including the hash value in each entry and incur the penalty of reading the join field for each entry in the bucket. Apart from reducing the writes, this approach will also save the write time at the cost of additional read time. Assuming $B$ buckets and a uniform Hash Table distribution, there would be $\dfrac{N_R}{B}$ entries in each bucket. The time incurred for writing the hash values will be $\lambda R \times size_{hashfield}$. For each $S$ tuple, due to the absence of hash value field, we would need to read the join column value from PCM taking a time of $\dfrac{N_R}{B} \times R$. Hence, skipping to include the hash value field will be advantageous in terms of time as well if:\\ 
+We can avoid including the hash value in each entry and incur the penalty of reading the join field for each entry in the bucket. Apart from reducing the writes, this approach will also save the write time at the cost of additional read time. Assuming $B$ buckets and a uniform Hash Table distribution, there would be $\frac{N_R}{B}$ entries in each bucket. Assuming $size_{hash\_value}$ as the size of the hash value in each entry (where $size_{hash\_value} < size_{entry}$), the time incurred for writing the hash values will be $t_w \times size_{hash\_value}$. For each $S$ tuple, due to the absence of hash value field, we would need to read the join column value from PCM taking a time of $\frac{N_R}{B} \times t_r$. Hence, skipping to include the hash value field will be advantageous in terms of time as well if:\\ 
 \begin{equation}
 \begin{split}
-N_S \times \dfrac{N_R}{B} \times  T_r \leq  T_w \times size_{hashfield} \times N_R \\
-\implies N_S \times \dfrac{N_R}{B} \times  T_r \leq \lambda T_r \times size_{hashfield} \times N_R \\
-\implies  N_S \leq \lambda \times size_{hashfield} \times B
+N_S \times \dfrac{N_R}{B} \times  t_r \leq  t_w \times size_{hash\_value} \times N_R \\
+\implies N_S \times \dfrac{N_R}{B} \times  t_r \leq \lambda t_r \times size_{hash\_value} \times N_R \\
+\implies  N_S \leq \lambda \times size_{hash\_value} \times B
 \end{split}
 \end{equation}
+
+\textbf{Write Analysis}: Continuing with the analysis of bitmapped hash table, we now avoid incurring writes for hash value storage leading to writes of $N_R \times (1 + size_{entry} + 2 \times \frac{size_{ptr}}{T_p} - size_{hash\_value})$
 
 
 A third approach takes the middle ground between cycles and writes. If we associate with each tuple pointer a 1 byte hash value, it will prevent fetching each inner relation tuple's join column value for each probe of outer relation. Assuming inner relation tuples are uniformly distributed and the hash function maintains this uniformity in hash values also, the chances of collision of hash values would be  $numtuples in a bucket/2^8 = numTuples/256 $. Then the number of PCM accesses required would be $numTuplesinBucket/256$. 
@@ -314,11 +319,13 @@ A third approach takes the middle ground between cycles and writes. If we associ
 
 Well known techniques for Group By include \textit{sorting} and \textit{hashing}. Hashing, by virtue of lesser time complexity, is generally the method of choice, unless sorted tuples are beneficial for the operators following later in the query plan tree.
 
-A hash table entry for Group By, as compared to hash table entry in hash join, is accompanied by an additional field of aggregate value. For each new tuple in the input array, a bucket index is obtained after hashing the value(s) of the column(s) featuring in the Group By expression. Subsequently, a search is made in the bucket indicated. If a tuple matching in the Group By column(s) value is found, the aggregate field value is updated; else, a new entry is created in the bucket. Thus, unlike Hash Join where each smaller relation tuple has an entry of its own, the grouped tuples share a common entry with an aggregate field that usually keeps getting updated over the course of the algorithm.
+A hash table entry for Group By, as compared to hash table entry in hash join, is accompanied by an additional field of aggregate value. For each new tuple in the input array, a bucket index is obtained after hashing the value(s) of the column(s) featuring in the Group By expression. Subsequently, a search is made in the bucket indicated by the index. If a tuple matching in the Group By column(s) value is found, the aggregate field value is updated; else, a new entry is created in the bucket. Thus, unlike Hash Join where each smaller relation tuple has an entry of its own, the grouped tuples share a common entry with an aggregate field that usually keeps getting updated over the course of the algorithm.
 
 We use the same hash table as used in the Hash Join operator.
 
-In the DRAM\_CACHE model, if the hash table happens to be larger than the DRAM size, these intermediate updates would tend to get evicted from DRAM to PCM periodically, leading to extra writes. Assuming there are $G$ groups, the number of separate entries in the Hash Table would be $G$, incurring $G \times size_{hashentry}$ writes. The writes due to updation on the other hand would be $N_R \times size_{aggregatefield}$ assuming each intermediate update gets evicted.
+In the DRAM\_CACHE model, if the hash table happens to be larger than the DRAM size, these intermediate updates would tend to get evicted from DRAM to PCM periodically, leading to extra writes. 
+
+\textbf{Write Analysis}: Assuming there are $G$ groups, the number of separate entries in the Hash Table would be $G$, incurring $G \times size_{hashentry}$ writes. The writes due to updation on the other hand would be $N_R \times size_{aggregatefield}$ assuming each intermediate update gets evicted.
 
 \subsection{Unitary increment based Group-By}
 There can be cases where the Hash Table size if much larger than the DRAM and the Group By aggregate field involves a counter that undergoes unit increments. A sample case in point is the \textit{Count} aggregate function. A simple binary counter can lead to an arbitrary number of writes during intermediate evictions. For e.g., consider a counter having a decimal value of $2$ represented by a 3-bit binary value of $010$. An increment would change it to $011$ incurring a 1 bit write. A subsequent increment however would change it to $100$ leading to 3 bit writes. For such scenarios, we propose counters based on \textit{Gray Codes}\cite{gray_code}. The Gray Code representation between two contiguous count value differs by a single bit. For the previous example, the next gray code value after $011$ will be $111$. Thus, in the case where there is a high probability of each successive count value getting evicted, the writes per eviction would be close to a few bits.
@@ -328,7 +335,9 @@ An alternative methodology to avoid the extra intermediate writes due to aggrega
 
 \subsubsection{Materialized partitioned Group By}
 
-In the materialized scheme, the partitions are written out in a separate PCM area. We then process the tuples in one partition during a pass. The writing of partitions would itself amount to writes of the order of $N_R \times L_R$, clearly a self-defeating approach. One way to get around this problem is to use RIDs for partitioning as used in \cite{chen}. The writes would then be reduced to $N_R \times size_{RID}$.
+In the materialized scheme, the partitions are written out in a separate PCM area. We then process the tuples in one partition during a pass. 
+
+\textbf{Write Analysis}: The writing of partitions would itself amount to writes of the order of $N_R \times L_R$, clearly a self-defeating approach. One way to get around this problem is to use RIDs for partitioning as used in \cite{chen}. The writes would then be reduced to $N_R \times size_{RID}$.
 
 \begin{algorithm}[h!]
 \caption{Multi-Pivot PCM aware partition}
@@ -356,7 +365,9 @@ In the materialized scheme, the partitions are written out in a separate PCM are
 \end{algorithm}
 
 \subsubsection{Non-materialized partitioned Group By}
-We propose the multi-pass Group By scheme, on the same lines as the multi-pass sort scheme, where we avoid materializing the partitions. We instead choose to scan through the entire set of tuples, ignoring the tuples not belonging to the current partition being processed. The writes in such a scheme would then be $G \times (size_{hashentry} + size_{aggregatefield}) $
+We propose the multi-pass Group By scheme, on the same lines as the multi-pass sort scheme, where we avoid materializing the partitions. We instead choose to scan through the entire set of tuples, ignoring the tuples not belonging to the current partition being processed.
+
+\textbf{Write Analysis}: The writes in such a scheme would then be $G \times (size_{hashentry} + size_{aggregatefield}) $
 
 
 \section{Simulation Platform}
