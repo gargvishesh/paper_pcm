@@ -9,10 +9,11 @@
 %
 \documentclass[10pt,conference,letterpaper]{IEEEtran}
 \usepackage{times,amsmath,epsfig,booktabs}
+\usepackage[hyphens]{url}
 \usepackage{algorithm}
 \usepackage{algpseudocode}
 %
-\title{Efficient Query Execution for Phase Change Memory Conscious Databases}
+\title{Query Execution Algorithms for Phase Change Memory Conscious Databases}
 %
 \author{%
 % author names are typeset in 11pt, which is the default size in the author block
@@ -52,7 +53,7 @@
 \maketitle
 %
 \begin{abstract} 
-\textit{Phase Change Memory (PCM)} is a non-volatile, random access and byte-addressable memory that is being touted as one of the most promising upcoming memory technologies. Besides its desirable features of high density, comparable read latency, and low idle power vis-a-vis the DRAM, PCM also comes with certain peculiar characteristics of asymmetric I/O and limited write endurance. Its limitations notwithstanding, the overwhelming advantages offered by PCM indicate that it might not be long before database systems have PCM included in the underlying memory hardware. However, current query processing is designed keeping in mind the DRAM properties of read/write symmetry and unlimited write endurance. These assumptions being violated in a PCM environment, such design needs revisiting for suitability in the new setting. Earlier works on PCM friendly database algorithms targeted a myriad of possible PCM inclusive system models, without giving ample justification for the choice of their model. Moreover, they took individual operators in their ambit, regardless of their overall effect on query execution. We, for the first time in literature, delve into the pros and cons of all the existing system models. Subsequently, we propose PCM conscious algorithms for database ``workhorse" operators \textit{Sort}, \textit{Hash Join} and \textit{Group By}, relevant to the best model, in the context of full query execution. We include PCM support in a state-of-the-art simulator and use it to test our algorithms on TPCH benchmark queries. Our work shows an improvement of 30\% on writes and 20\% on run time, on average, as compared to existing algorithms; thus bringing databases a step closer to being amply prepared for the PCM transition.
+\textit{Phase Change Memory (PCM)} is a non-volatile, random access and byte-addressable memory that is being touted as one of the most promising upcoming memory technologies. Besides its desirable features of high density, comparable read latency, and low idle power vis-a-vis the DRAM, PCM also comes with certain peculiar characteristics of asymmetric I/O and limited write endurance. Its limitations notwithstanding, the overwhelming advantages offered by PCM indicate that it might not be long before database systems have PCM included in the underlying memory hardware. However, current query execution is designed keeping in mind the DRAM properties of read/write symmetry and unlimited write endurance. These assumptions being violated in a PCM environment, such design choices need revisiting for suitability in the new setting. Prior work in this area targeted a myriad of PCM inclusive system models, without giving ample justification for the choice of their model. Moreover, they took individual operators in their ambit, regardless of their overall effect on query execution. We, for the first time in literature, present a critical evaluation of the existing system models from a database perspective. Subsequently, we propose PCM conscious algorithms for database ``workhorse" operators \textit{sort}, \textit{hash join} and \textit{group-by}, relevant to the best model, in the context of full query execution. We include PCM support in a state-of-the-art simulator and use it to test our algorithms on TPCH benchmark queries. Our work shows an improvement of X\% on writes and Y\% on run time, on average, as compared to existing algorithms; thus bringing databases a step closer to being amply prepared for the PCM transition.
 \end{abstract}
 
 % NOTE keywords are not used for conference papers so do not populate them
@@ -62,7 +63,7 @@
 %
 \section{Introduction}
 %
-\textit{Phase Change Memory (PCM)} is a type of non-volatile memory that is made up of chalcogenide glass which stores data by switching between crystalline and amorphous states. Not only is it 2-4X denser and lesser idle power consuming than DRAM , it also has a comparable read latency. Due to these properties, it has been abuzz in the computer architecture community as the next major memory technology potentially replacing or augmenting the current components of the memory hierarchy \cite{qureshi}, \cite{zhou}, \cite{lee}. In fact recently, IBM came up with a PCM chip that is 275 times faster than SSD \cite{ibm}.
+\textit{Phase Change Memory (PCM)} is a type of non-volatile memory that is made up of chalcogenide glass which stores data by switching between crystalline and amorphous states. Not only is it 2-4X denser and lesser idle power consuming than DRAM, it also has a DRAM comparable read latency. A peculiar characteristic of PCM is a significant difference between read and write behaviours in terms of energy, latency and bandwidth. Besides, it comes with a serious limitation of limited write endurance. Despite its limitations, PCM has been abuzz in the computer architecture community as the next major memory technology potentially replacing or augmenting some of the current components of the memory hierarchy \cite{qureshi}, \cite{zhou}, \cite{lee}. 
 
 \begin{figure*}[htbp]
 	\psfig{figure=PCM_Models.eps}\centering
@@ -71,19 +72,22 @@
 \end{figure*}
 
 
-The data explosion in this era of big data has ensured that DRAM capacities can no longer keep pace with database sizes. Consequently, most databases today are disk resident. Since majority of the tasks in database processing are data intensive, such a configuration amounts to CPU spending most of its time waiting for the data. Thus, PCM can be particularly beneficial to database systems to plug this latency gap between the DRAM and the disk. 
+In the recent years, chip manufacturers have come up with new PCM prototypes and products \cite{samsung}, \cite{micron}, \cite{ibm} signalling the advent of PCM based systems. This indicates that the transition of database systems to a PCM inclusive hardware is indeed imminent. Thus, it is imperative for databases to be geared up for this transition if they are to utilize PCM to the fullest potential.
 
-One peculiar characteristic of PCM is a significant difference between read and write behaviours in terms of energy, latency and bandwidth. Besides, it comes with a serious limitation of limited write endurance. Such issues with PCM need to be addressed before we can incorporate it in the memory hierarchy for mainstream data processing. Query execution in database systems has hitherto been designed assuming symmetric read and write behaviours. This assumption being violated in the PCM environment, current query processing algorithms can be grossly sub-optimal in terms of both time and writes in such a setting. The glaring performance advantage reads bestow us with when traded for writes cannot be overlooked. Hence, the design of query processing algorithms for PCM calls for a significant change in perspective as compared to current design methodology.  
+There are multiple possible manners in which PCM can be incorporated in the memory hierarchy. Many diverse configurations already exist in the literature \cite{qureshi}, \cite{lee}, \cite{condit}, \cite{viglas}. Given the choice of the model heavily impacts the algorithm design choices, the need for a critical evaluation of existing system models to come up with the most potent candidate for the future is indispensable. Otherwise, all our efforts to come up with the right algorithm design may prove to be futile. 
 
-There has been similar research undertaken earlier for database query processing on flash disks\cite{graefe}. However, PCM differs from flash in some key aspects. Firstly, flash supports block addressability whereas PCM is byte addressable. Secondly, the read latency of flash is about 32 times slower than DRAM whereas that of PCM is almost comparable. The techniques for flash devices were developed according to these block and latency properties. PCM, on the other had would demand a separate customized set of algorithms if it is to be utilized to its full potential.
 
-\subsection{Contribution and Organization}
-In this work, we address end-to-end query processing for a PCM based memory architecture. In particular, we make the following contributions :
+Once the system model is decided upon, the next step is designing suitable query execution algorithms for the corresponding model. Algorithm design for database query execution in a PCM environment represents a departure from the conventional design principles based on symmetric read and write behaviours. For instance, the inherent properties of PCM expose a glaring performance gap between reads and writes, which can be exploited to our advantage by trading writes for reads. Current query execution, being rooted in symmetric I/O assumption, can be grossly sub-optimal in this new paradigm. Thus, PCM compliant query execution calls for a transformation in the hitherto established design perspective.
+
+There has been similar research undertaken earlier for database query execution on flash disks \cite{graefe}. However, PCM differs from flash in some key aspects. Firstly, flash supports block addressability whereas PCM is byte addressable. Secondly, the read latency gap between  Flash and DRAM is quite large (32X) whereas the read latencies of PCM and DRAM are almost comparable. These differences deem Flash suitable techniques sub-optimal for PCM. Thus, the right way to go forward would be to devise a separate customized set of algorithms for query execution on PCM.
+
+\subsection*{Contributions}
+In this work, we address end-to-end query execution for a PCM based memory architecture. In particular, we make the following contributions :
 
 \begin{itemize}
-\item We scrutinize the various existing system models incorporating PCM in the memory hierarchy to suggest the best model.
+\item We scrutinize the various existing system models incorporating PCM in the memory hierarchy from a database perspective to come up with the best model.
 
-\item We propose PCM conscious algorithms for \textit{sort}, \textit{hash join} and \textit{group by}, that constitute the ``workhorse" operators of database systems, in the context of end-to-end query execution.
+\item We propose PCM conscious algorithms for \textit{sort}, \textit{hash join} and \textit{group by}, which constitute the ``workhorse" operators of database systems, in the context of end-to-end query execution.
 
 \item We make modifications to a state-of-the-art architectural simulator Multi2sim\cite{multi2sim} to add PCM support in the memory hierarchy.
 
@@ -99,15 +103,7 @@ In this work, we address end-to-end query processing for a PCM based memory arch
 \section{System Models}
 \label{pcm}
 
-Table \ref{tab:tab_pcm_char} show the characteristics of PCM as compared to DRAM and HDD. Based on the table, we can infer the following properties that need to be kept in mind while designing algorithms for PCM based systems:
-
-\begin{itemize}
-
-
-\item Higher energy consumption during a write than during a read.
-\item High latency and low bandwidth of a write operation.
-\item Limited endurance of a PCM cell.
-\end{itemize}
+Table \ref{tab:tab_pcm_char} show the characteristics of PCM as compared to DRAM and HDD. Based on the table, we now discuss the four alternative models proposed in the current literature for incorporating PCM in the memory hierarchy  \cite{qureshi}, \cite{lee}, \cite{condit}, \cite{viglas}. The corresponding arrangements are shown in Figure \ref{fig:pcm_models}.
 
 \begin{table}[!h]
 \centering
@@ -148,16 +144,14 @@ Table \ref{tab:tab_pcm_char} show the characteristics of PCM as compared to DRAM
 
 
 
-There are four alternatives proposed to the current model when incorporating PCM in the memory hierarchy in the current literature \cite{qureshi}, \cite{lee}, \cite{condit}, \cite{viglas}. The corresponding arrangements are shown in Figure \ref{fig:pcm_models},
 
-\begin{enumerate}[label=(\alph*)]
 
-\item \textbf{PCM\_DISK}: In this model, PCM is proposed as an alternative to disk. The advantage of this model is that existing database systems can run oblivious to the change in the underlying hardware treating PCM as the disk. However, given the huge database sizes of today, the density and cost of PCM would make it to accommodate the entire database on PCM itself. Disk, by virtue of being much denser and cheaper, is likely continue to be the memory technology for persistent database storage.
+a) \textbf{PCM\_DISK}: In this model, PCM is proposed as an alternative to disk. The advantage of this model is that existing database systems can run oblivious to the change in the underlying hardware treating PCM as the disk. However, given the huge database sizes of today, the density and cost of PCM would make it infeasible to accommodate the entire database on PCM itself. Disk, by virtue of being much denser and cheaper, is likely continue to be the memory technology for persistent database storage.
 
-\item \textbf{PCM\_DRAM}: This model corresponds to PCM entirely replacing the DRAM. Hence, the program address space now maps to PCM instead of the DRAM. It has the same advantage of straightforward portability of existing databases to new PCM inclusive systems, as the previous model. The limitation however is that since PCM now directly follows the Last Level Cache(LLC), each time there is an LLC miss, PCM latency will be incurred. Since PCM has relatively higher latency than DRAM, it will lead to significant degradation in the system performance.
+b) \textbf{PCM\_DRAM}: This model corresponds to PCM entirely replacing the DRAM. Hence, the program address space would map to PCM instead of the DRAM. It shares the same advantage of straightforward portability of existing databases to new PCM inclusive systems, as the previous model. The limitation however is that since PCM now directly follows the Last Level Cache(LLC), each time there is an LLC miss, PCM latency will be incurred. Since PCM has relatively higher latency than DRAM, it will lead to significant degradation in the system performance.
 
-\item \textbf{PCM\_DRAM\_EXPLICIT}: Both the DRAM and the PCM are in explicit control of the software in this model. Thus, there is great flexibility available in terms of leaving the utilization of the two available memory devices to the database or the operating system. 
-This model would require putting in additional machinery in place in order to distinguish between data mapped to DRAM and the PCM; one such way being having separate address space mapping for both of them.  Such as organization would require the database programmer to have apriori information about the existence of PCM to utilize its availability. In the absence of such prior knowledge, such as in existing database systems, the onus of PCM utilization will be on the operating system designer in building within the OS additional intelligence of performing optimal data distribution on the DRAM and the PCM. The latter can be tricky since different applications have different data usage patterns. When none of the above is the case, databases would end up using only the the DRAM, and thus be devoid of the benefits of PCM availability.
+c) \textbf{DRAM\_EXPLICIT}: Both the DRAM and the PCM are in explicit control of the software in this model. Thus, there is great flexibility offered in terms of leaving the utilization of the two available memory devices to the database or the operating system. 
+This model requires putting additional machinery in place in order to distinguish between data mapped to DRAM and the PCM; one such way being having separate address space mapping for both of them. Such an organization would require the database programmer to have apriori information about the existence of PCM to utilize its availability. In the absence of such prior knowledge, such as in existing database systems, the onus of PCM utilization will be on the operating system designer in building within the OS additional intelligence of performing optimal data distribution on the DRAM and the PCM. The latter can be tricky since different applications have different data usage patterns. When none of the above is the case, databases would end up using only the DRAM, and thus be devoid of the benefits of PCM availability.
 
 
 %\begin{figure}[h]
@@ -166,18 +160,15 @@ This model would require putting in additional machinery in place in order to di
 %\label{fig:sys_model}
 %\end{figure}
 
-\item \textbf{DRAM\_CACHE}: A fourth model chooses to augment PCM with a small hardware managed DRAM buffer. It was shown that such an organization can mitigate most of the latency issues associated with PCM as compared to DRAM\cite{qureshi}. In such a model, the address space of the application maps to PCM and DRAM can be visualized as as another level of cache. Thus, the existing applications can be used \textit{as is} and yet manage to take advantage of both of these devices. 
+d) \textbf{DRAM\_CACHE}: A fourth model chooses to augment PCM with a small hardware managed DRAM buffer. It was shown that such an organization can mitigate most of the latency issues associated with PCM as compared to DRAM \cite{qureshi}. In such a model, the address space of the application maps to PCM and DRAM can be visualized as another level of cache. Thus, the existing applications can be used \textit{as is} and yet manage to take advantage of both the DRAM and the PCM. A limitation of this model is that, since the DRAM is now in control of the hardware, its availability is subject to the buffer management strategy adopted by the hardware. Thus, in such a system, it would be hard to predict the amount of the DRAM available making it difficult to design optimized algorithms that depend on the size of DRAM.
 
-\end{enumerate}
-
-We have adopted model (d) for our algorithms for the reasons explained above. We henceforth refer to this model as the \textit{DRAM\_CACHE} model.
+Based on the above analysis, the \textit{DRAM\_CACHE} model stands out as the model of choice for future systems due to its capacity to handle large database sizes, its mitigation of PCM latency issues using a DRAM, and at the same time, its ability to offer even PCM oblivious databases the advantages of PCM. Hence, in the following sections, we assume \textit{DRAM\_CACHE} as the underlying system model.
 
 
-\section{Notations and Assumptions}
-\label{notations}
-Table \ref{tab:notations} lists the terms we use throughout the paper to analyse our algorithms. For \textit{Sort} and \textit{Group By} operators, we consider $R$ as the input relation. During sort, $N_R$ represents the cardinality of relation $R$ partition on PCM during external merge sort. In group by, we assume that the relation R has been hash partitioned into PCM sized chunks and $N_R$ represents the size of one such chunk. For the \textit{Hash Join} operator, we assume $R$ as the smaller relation, on which the Hash Table is constructed, and $S$ as the probing relation. Here, as in Group By, we assume $N_R$ and $N_S$ as the cardinality of one partition of relations $R$ and $S$.
+\section{Assumptions}
+\label{assumptions}
 
-We assume a set-associative memory organization of DRAM. During a program run, three regions of memory are accessed - code, stack and the heap. All these regions would share a common DRAM. Hence, we need to account for the shortfall in DRAM space due to these additional components. If the DRAM were direct-mapped, then accessing one region may have lead to eviction of another. So the DRAM must be at least 3-way set associative. Assuming one way per set will be consumed by the stack data another way will be consumed by the executable code, the effective DRAM size (denoted by $|DRAM|$) would be $\frac{\#ways-2}{\#ways} \times Size_{DRAM}$. Note that for this to hold true, $\#sets$ should be greater than both the stack data size and the executable code size individually.
+During a program run, three regions of memory are accessed - code, stack and the heap. All these regions would share a common DRAM. Hence, we need to account for the shortfall in DRAM space due to these additional components. If the DRAM were direct-mapped, then accessing one region may have lead to eviction of another. We assume a set-associative memory organization of DRAM with atleast 3-way set associativity. Assuming one way per set will be consumed by the stack data another way will be consumed by the executable code, the effective DRAM size (denoted by $|DRAM|$) would be $\frac{\#ways-2}{\#ways} \times Size_{DRAM}$. Note that for this to hold true, $\#sets$ should be greater than both the stack data size and the executable code size individually.
 
 For write analyses of our algorithms, we assume that there are no conflict-misses in DRAM. Thus for any operations on data within DRAM size, there are no evictions and consequently no writes.
 
@@ -186,13 +177,15 @@ We assume a \textit{data-comparison write (DCW)} scheme \cite{write}. In this sc
 We use \textit{N-Chance}\cite{nchance} as the eviction policy for DRAM.  In this scheme, the first non-dirty way in the N least recently used ways (assuming N is less than the cache associativity) in a set is chosen as the victim for eviction. If all the N ways are dirty, the LRU entry is evicted. It was shown that this scheme works best when N = $\frac{\#ways}{2}$.
  
 %\centering
+
+\section{Notations}
+Table \ref{tab:notations} lists the terms we use throughout the paper to analyse our algorithms. For \textit{sort} and \textit{group-by} operators, we consider $R$ as the input relation. For the \textit{hash join} operator, we assume $R$ as the smaller relation, on which the Hash Table is constructed, and $S$ as the probing relation.
+
+
 \begin{table}[!h]
 \centering
-
-
 \caption{Terms used in algorithms analyses}
 \label{tab:notations}
-%\centering
 \begin{small}
 \begin{tabular}{p{2.3cm}p{5.5cm}}
 \toprule  
@@ -205,23 +198,25 @@ We use \textit{N-Chance}\cite{nchance} as the eviction policy for DRAM.  In this
 \textbf{$t_r$} & Read Latency per bit\\
 \textbf{$t_w$} & Write Latency per bit\\
 \textbf{$\lambda = \frac{t_w}{t_r}$} & Write to read latency ratio\\
-
 \bottomrule
 \end{tabular}
 \end{small}
 \end{table}
 
+
+\label{notations}
+
 \section{Sort}
 \label{sort}
 
-Sorting is one of the most commonly used operations in database systems underlying operators like Merge Join, Order By and occasionally Group By. The process of sorting is quite write-intensive since the commonly used in-memory sorting algorithms, like \textit{quicksort}, involve a lot of data movement. In the quicksort algorithm with $n$ elements, the average number of swaps is of the order of $0.3nln(n)$ \cite{swaps}. In the $DRAM\_CACHE$ model, assuming each pair of such swapped elements gets evicted immediately, this would amount to $0.6N_RL_Rln(N_RL_R)$ writes. There are other algorithms like \textit{selection sort} which involve much lesser data movement but they incur quadratic time complexity in the number of elements to be sorted; thereby falling out of favour for large datasets.
+Sorting is one of the most commonly used operations in database systems underlying operators like Merge Join, Order By and occasionally Group By. The process of sorting is quite write-intensive since the commonly used in-memory sorting algorithms, like \textit{quicksort}, involve a lot of data movement. In the dual pivot quicksort algorithm with $n$ elements, the average number of swaps is of the order of $0.3nln(n)$ \cite{swaps}. In the \textit{DRAM\_CACHE} model, assuming each pair of such swapped elements gets evicted immediately, this would amount to $0.6N_RL_Rln(N_RL_R)$ writes. There are other algorithms like \textit{selection sort} which involve much lesser data movement but they incur quadratic time complexity in the number of elements to be sorted; thereby falling out of favour for large datasets.
 
 In the cases when the memory size is smaller than the data to be sorted, \textit{external mergesort} algorithm is used to generate sorted runs of memory sized chunks followed by merging those chunks to get the sorted output.
 
 We propose an in-memory sorting algorithm based on \textit{single-pivot} quicksort that uses multiple pivots to reduce the writes while retaining the time complexity of the single-pivot algorithm. We term the algorithm as \textit{multi-pivot sort}. In the following subsections, we begin by presenting the write-efficient single pivot case and subsequently cover the multi-pivot algorithm and its variations.
 
 \subsection{Single-pivot quicksort}
-The conventional quicksort algorithm uses a single pivot to divide the input data into two partitions, consisting of elements lesser than the pivot in one and those greater in another. Since there are just two partitions, we know one of the two endpoints for each partition apriori - the beginning of the array for the $1^{st}$ and the end of the array for the $2^{nd}$. Thus, we can have a write-efficient partitioning scheme where we have two pointers starting from both the ends of the array moving towards the centre, swapping a misplaced element in one partition with that in the other, as in hoare-partitioning\cite{cormen}.
+The conventional quicksort algorithm uses a single pivot to divide the input data into two partitions, consisting of elements lesser than the pivot in one and those greater in another. Since there are just two partitions, we know one of the two endpoints for each partition apriori - the beginning of the array for the $1^{st}$ and the end of the array for the $2^{nd}$. Thus, we can have a write-efficient partitioning scheme where we have two pointers starting from both the ends of the array moving towards the centre, swapping a misplaced element in one partition with that in the other, as in hoare-partitioning \cite{cormen}.
 
 \subsection{Multi-pivot sort}
 
@@ -246,9 +241,9 @@ Both the read phase and the swap phase are represented by the pseudo-code in Alg
 \begin{algorithm}[h!]
 \caption{Multi-Pivot PCM aware partition}
 \label{alg:multi_pivot_pcm_partition}
-\textbf{c} is a constant having value 2-3\\
+\textbf{c} is a constant having value between 2 and 3\\
 \begin{algorithmic}[1]
-\State $ k = c\times \frac{N_R L_R}{|DRAM|}$;
+\State $ p = c\times \frac{N_R L_R}{|DRAM|}$;
 \State $randIndex[]$ = generate k random indexes;
 \State $ pivot[] = a[randIndex]$;
 \State $ size[] = {0..0}$;   
@@ -257,11 +252,11 @@ Both the read phase and the swap phase are represented by the pseudo-code in Alg
 \For {$i$=$1$ to $N_R$}
 \State Increment the size of sub-array corresponding to $a[i]$; 
 \EndFor
-\Comment {Time complexity=$n\times log_2k$ }
+\Comment {Time complexity=$N_R\times log_2p$ }
 \State Calculate the boundary index of sub-arrays using their size.\\
 \textbf{Swap Phase}
 \State Swap wrong elements in sub-arrays in a cycle so that each element is in its correct sub-array;
-\Comment {Time complexity=$n\times log_2k$ }
+\Comment {Time complexity=$N_R\times log_2p$ }
 \State return sub-arrays boundary indexes;
 \end{algorithmic}
 \end{algorithm}
@@ -278,16 +273,16 @@ In the previous subsection, both the swap and the sort phase incurred full-tuple
 \textbf{Write Analysis}: The writes during the partitioning phase and sorting phase due to pointers would now be $2 \times N_R \times size_{ptr}$. The writes during writing out the final sorted tuples is $N_R L_R$. 
 
 \subsection{Multi-pass multi-pivot sort}
-In this variant, we jettison the the swap phase of the multi-pivot sort. Instead, we jump directly to the sorting phase after the read phase, using multiple passes to carry out the sort. In each pass, elements ranging between a consecutive pair of pivots are copied to the output buffer. They are then immediately sorted. Note that despite going over the entire array in the process of extracting them, these tuples wouldn't have been evicted prior to sorting since N-Chance eviction policy gives preference to non-dirty entries over dirty entries for eviction.
+In this variant, we jettison the swap phase of the multi-pivot sort. Instead, we jump directly to the sorting phase after the read phase, using multiple passes to carry out the sort. In each pass, elements ranging between a consecutive pair of pivots are copied to the output buffer. They are then immediately sorted. Note that despite going over the entire array in the process of extracting them, these tuples wouldn't have been evicted prior to sorting since N-Chance eviction policy gives preference to non-dirty entries over dirty entries for eviction.
 
 \textbf{Write Analysis}: The writes in this case would  simply be $N_R L_R$ since each partition is directly sorted and written out.
 
 \section{Hash Join}
 \label{hj}
 
-Hash Join is another workhorse operator in database systems used most frequently among all join operators. The variants of Hash Join include Simple, Grace and Hybrid Join. In the case where smaller relation doesn't fit in memory, both the relations are partitioned and the join is performed on a pair of partitions at a time. A hash table is built on the smaller relation and larger relation tuples are used to probe for matching value(s) in the join column(s)    .
+Hash join is another workhorse operator in database systems used most frequently among all join operators. The variants of hash join include Simple, Grace and Hybrid Join. In the case where smaller relation doesn't fit in memory, both the relations are partitioned and the join is performed on a pair of partitions at a time. A hash table is built on the smaller relation and larger relation tuples are used to probe for matching value(s) in the join column(s)    .
 
-During the progress of Hash Join, the parts of the algorithm that incur writes are the reading in of tuples, the writing out of join results and the building of the hash table. Since the reading in and the writing out processes are indispensable, we focus our attention on minimising the writes for the hash table.
+During the progress of hash join, the parts of the algorithm that incur writes are the reading in of tuples, the writing out of join results and the building of the hash table. Since the reading in and the writing out processes are indispensable, we focus our attention on minimising the writes for the hash table.
 
 We discuss the conventional Hash Table construction followed by our optimisations in the next subsections. We assume $size_{entry}$ as the hash table entry size for each smaller relation tuple and $size_{ptr}$ as the size of the pointer.
 
@@ -329,32 +324,32 @@ N_S \times \dfrac{N_R}{B} \times  t_r \leq  t_w \times size_{hash\_value} \times
 Figure \ref{fig:hash_table_org} represents the hash table organization with the various optimisations.
 %A third approach takes the middle ground between cycles and writes. If we associate with each tuple pointer a 1 byte hash value, it will prevent fetching each inner relation tuple's join column value for each probe of outer relation. Assuming inner relation tuples are uniformly distributed and the hash function maintains this uniformity in hash values also, the chances of collision of hash values would be  $numtuples in a bucket/2^8 = numTuples/256 $. Then the number of PCM accesses required would be $numTuplesinBucket/256$. 
 
-\section{Group By}%
+\section{Group-By}%
 \label{gby}
 
-Well known techniques for Group By include \textit{sorting} and \textit{hashing}. Hashing, by virtue of lesser time complexity, is generally the method of choice, unless sorted tuples are beneficial for the operators following later in the query plan tree. Besides, sorting has an additional drawback of greater writes. Hence, We adopt hashing as the technique for grouping on PCM based systems.
+Well known techniques for group-by include \textit{sorting} and \textit{hashing}. Hashing, by virtue of lesser time complexity, is generally the method of choice, unless sorted tuples are beneficial for the operators following later in the query plan tree. Besides, sorting has an additional drawback of greater writes. Hence, We adopt hashing as the technique for grouping on PCM based systems.
 
-In the following subsections, we start with the conventional Group By operator and later present techniques to achieve a reduction in the writes. We focus on optimizations specific to the Group By operator. The aspect of space management and write optimization in buckets of the Hash Table was dealt with in the previous section on Hash Join operator. Although we can use those same optimizations in conjunction with these techniques, we omit them here for the sake of simplicity. Consequently, we restrict ourselves to writes due to creation of new entries and aggregate field updation in the analyses of the various techniques presented. We assume that there are $G$ groups in the relation and $size_{agg\_field}$ represents the size of the aggregate field. As in Hash Join, we assume $size_{entry}$ as the hash table entry size for each smaller relation tuple.
+In the following subsections, we start with the conventional group-by operator and later present techniques to achieve a reduction in the writes. We focus on optimizations specific to the group-by operator. The aspect of space management and write optimization in buckets of the Hash Table was dealt with in the previous section on hash join operator. Although we can use those same optimizations in conjunction with these techniques, we omit them here for the sake of simplicity. Consequently, we restrict ourselves to writes due to creation of new entries and aggregate field updation in the analyses of the various techniques presented. We assume that there are $G$ groups in the relation and $size_{agg\_field}$ represents the size of the aggregate field. As in hash join, we assume $size_{entry}$ as the hash table entry size for each smaller relation tuple.
 
-\subsection{Conventional Group By}
+\subsection{Conventional group-by}
 
-A hash table entry for Group By, as compared to hash table entry in hash join, is accompanied by an additional field of aggregate value. For each new tuple in the input array, a bucket index is obtained after hashing the value(s) of the column(s) featuring in the Group By expression. Subsequently, a search is made in the bucket indicated by the index. If a tuple matching in the Group By column(s) value is found, the aggregate field value is updated; else, a new entry is created in the bucket. Thus, unlike Hash Join where each smaller relation tuple has an entry of its own, the grouped tuples share a common entry with an aggregate field that usually keeps getting updated over the course of the algorithm. In the DRAM\_CACHE model, if the hash table happens to be larger than the DRAM size, these intermediate updates would tend to get evicted from DRAM to PCM periodically, leading to extra writes. 
+A hash table entry for group-by, as compared to hash table entry in hash join, is accompanied by an additional field of aggregate value. For each new tuple in the input array, a bucket index is obtained after hashing the value(s) of the column(s) featuring in the group-by expression. Subsequently, a search is made in the bucket indicated by the index. If a tuple matching in the group-by column(s) value is found, the aggregate field value is updated; else, a new entry is created in the bucket. Thus, unlike hash join where each smaller relation tuple has an entry of its own, the grouped tuples share a common entry with an aggregate field that usually keeps getting updated over the course of the algorithm. In the \textit{DRAM\_CACHE} model, if the hash table happens to be larger than the DRAM size, these intermediate updates would tend to get evicted from DRAM to PCM periodically, leading to extra writes. 
 
 \textbf{Write Analysis}: The number of separate entries in the Hash Table would be $G$, incurring $G \times size_{entry}$ writes. The writes due to updation on the other hand would be $N_R \times size_{agg\_field}$ assuming each intermediate update gets evicted.
 
 
 
-\subsection{Partitioned Group By} 
-An alternative methodology to avoid the extra intermediate writes due to aggregate field evictions is to partition the input relation into DRAM sized partitions, so that the updates are absorbed within the DRAM. In the following subsections, we present two such schemes of partitioned Group By, based on whether we choose to materialize the partitions or not.
+\subsection{Partitioned group-by} 
+An alternative methodology to avoid the extra intermediate writes due to aggregate field evictions is to partition the input relation into DRAM sized partitions, so that the updates are absorbed within the DRAM. In the following subsections, we present two such schemes of partitioned group-by, based on whether we choose to materialize the partitions or not.
 
-\subsubsection{Materialized partitioned Group By}
+\subsubsection{Materialized partitioned group-by}
 
 In the materialized scheme, the partitions are written out in a separate PCM area. We then process the tuples in one partition during a pass. The writing of partitions would itself amount to full tuple writes. One way to get around this problem is to use pointers for partitioning as used in \cite{chen}.
 
 \textbf{Write Analysis}: Writing out tuples during partitioning would incur a write cost of $N_R L_R$ . Using pointers instead would reduce the writes to $N_R \times size_{ptr}$. During the process of updates, the writes would be  additional writes of $G \times (size_{entry} + size_{agg\_field})$
 
 \begin{algorithm}[h!]
-\caption{Non-materialized partitioned Group By}
+\caption{Non-materialized partitioned group-by}
 \label{alg:non_materialized_partioned_gby}
 \begin{algorithmic}[1]
 \State $ p = c\times \frac{N_R L_R}{|DRAM|}$;
@@ -368,13 +363,13 @@ Group Tuple[j]
 \end{algorithmic}
 \end{algorithm}
 
-\subsubsection{Non-materialized partitioned Group By}
-We propose the multi-pass Group By scheme, on the same lines as the multi-pass sort scheme, where we avoid materializing the partitions. We instead choose to scan through the entire set of tuples, ignoring the tuples not belonging to the current partition being processed. Algorithm   \ref{alg:non_materialized_partioned_gby} represents the pseudo code for for this variant.
+\subsubsection{Non-materialized partitioned group-by}
+We propose the multi-pass group-by scheme, on the same lines as the multi-pass sort scheme, where we avoid materializing the partitions. We instead choose to scan through the entire set of tuples, ignoring the tuples not belonging to the current partition being processed. Algorithm   \ref{alg:non_materialized_partioned_gby} represents the pseudo code for for this variant.
 
 \textbf{Write Analysis}: Since this scheme would not incur any partitioning writes,  the writes would be restricted to $G \times (size_{entry} + size_{agg\_field}) $
 
-\subsection*{Unitary increment based Group By}
-There can be cases where the Hash Table size is much larger than the DRAM and the Group By aggregate field involves a counter that undergoes unit increments. A sample case in point is the \textit{Count} aggregate function. A simple binary counter can lead to an arbitrary number of writes during intermediate evictions. For e.g., consider a counter having a decimal value of $2$ represented by a 3-bit binary value of $010$. An increment would change it to $011$ incurring a 1 bit write. A subsequent increment however would change it to $100$ leading to 3 bit writes. For such scenarios, we propose counters based on \textit{Gray Codes}\cite{gray_code}. The Gray Code representation between two contiguous count value differs by a single bit. For the previous example, the next gray code value after $011$ will be $111$. Thus, in the case where there is a high probability of each successive count value getting evicted, the writes per eviction would be close to a few bits.
+\subsection*{Unitary increment based group-by}
+There can be cases where the Hash Table size is much larger than the DRAM and the group-by aggregate field involves a counter that undergoes unit increments. A sample case in point is the \textit{Count} aggregate function. A simple binary counter can lead to an arbitrary number of writes during intermediate evictions. For e.g., consider a counter having a decimal value of $2$ represented by a 3-bit binary value of $010$. An increment would change it to $011$ incurring a 1 bit write. A subsequent increment however would change it to $100$ leading to 3 bit writes. For such scenarios, we propose counters based on \textit{Gray Codes} \cite{gray_code}. The Gray Code representation between two contiguous count value differs by a single bit. For the previous example, the next gray code value after $011$ will be $111$. Thus, in the case where there is a high probability of each successive count value getting evicted, the writes per eviction would be close to a few bits.
 
 
 \section{Simulation Platform}
@@ -398,20 +393,14 @@ To be completed
 \label{relWork}
 On the architecture side, \cite{lee} discuss buffer management strategies to reduce PCM latency and energy consumption. \cite{qureshi} proposed wear levelling algorithms that randomly rotate the lines within a PCM page. \cite{qureshi}, \cite{write}, \cite{lee}, \cite{zhou} try to reduce writes by writing back only modified data to memory. In Flip-N-Write scheme\cite{flipnwrite}, a modified data word or its compliment is stored depending on whose hamming distance to the original word is lesser. As a result, it restrict the maximum bit writes per word to $B/2$ where \textit{B} is the number of bits in a word.
 
-On the database algorithms front, \cite{cost_aware} seeks to build the PCM read-write asymmetry information within the query optimizer itself. This is orthogonal to our work since we try to optimise for writes during the query execution stage. \cite{chen} proposes optimization for $B^+$ Tree index and Hash Join. It recommends keeping the keys unsorted at the leaf nodes of the index. This would incur extra search time but save writes. A pointer based partitioning approach is proposed to avoid full tuple writes. Since our work, addresses the problem of reducing the writes during the join phase, their technique compliments ours. 
+On the database algorithms front, \cite{cost_aware} seeks to build the PCM read-write asymmetry information within the query optimizer itself. This is orthogonal to our work since we try to optimise for writes during the query execution stage. \cite{chen} proposes optimization for $B^+$ Tree index and hash join. It recommends keeping the keys unsorted at the leaf nodes of the index. This would incur extra search time but save writes. A pointer based partitioning approach is proposed to avoid full tuple writes. Since our work, addresses the problem of reducing the writes during the join phase, their technique compliments ours. \cite{viglas} propose sort and join algorithms for system model \textit{PCM\_DISK}. Two classes of algorithms have been proposed for both sort and join. The first class of algorithms divides the input into write incurring and write limited parts. The write incurring part finishes in a single pass whereas the write limited part requires multiple passes. In the second class of algorithms, the materialization of intermediate results is deferred until the read cost (in terms of time) exceeds the write cost. Our work differs from this work since, unlike their model, our model has no explicit control over DRAM.
 
-\cite{viglas} proposed sort and join algorithms for system model (a) (as in Figure \ref{fig:pcm_models}). Two classes of algorithms have been proposed for both sort and join. The first class of algorithms divides the input into write incurring and write limited parts. The write incurring part finishes in a single pass whereas the write limited part requires multiple passes. In the second class of algorithms, the materialization of intermediate results is deferred until the read cost (in terms of time) exceeds the write cost. Our work differs from this work since, unlike their model, our model has no explicit control over DRAM. This means that we cannot selectively decide what to keep in DRAM at any point of time. It also implies that we may ultimately end up getting much lesser DRAM space than we had anticipated, due to other programs running in parallel on the system. Our algorithms have been designed in such a way that even in the worst case availability, we would do better than conventional algorithms in terms of writes. However, if we consider the sorting algorithms proposed there such as the  \textit{lazy sort} algorithm, it uses a heap that may keep constantly getting updated in each pass. If the available DRAM happens to be lesser than the heap size, it is likely that the updated entries keep getting evicted causing a large number of writes. Secondly, the join algorithms proposed there involve partitioning the data for the hash table to fit in DRAM. However, since the results are written out simultaneously with the join process and given the output for join is multiplicative (i.e. if $M$ and $N$ is the size of the input relations, there can potentially be $MN$ output records), it is likely that, unless the partitions are very small, the hash table gets evicted even after partitioning.
-
-Similar research has also been carried out for Flash devices. In \cite{graefe}, the use of a column based layout has been advocated. This would avoid fetching unnecessary attributes during scan. The same layout is also leveraged for joins by fetching only the columns participating in the join deferring full tuple materialization to as late as possible in the operator tree. External Merge sort is recommended for data not fitting in DRAM. Design goals for Flash memory differs from those for PCM since Flash devices support writes only at the block level as against byte level erase possible in PCM.
+Similar research has also been carried out for Flash devices. In \cite{graefe}, the use of a column based layout has been advocated. This would avoid fetching unnecessary attributes during scan. The same layout is also leveraged for joins by fetching only the columns participating in the join deferring full tuple materialization to as late as possible in the operator tree. External Merge sort is recommended for data not fitting in DRAM. Design goals for Flash memory differ from those for PCM since Flash devices support writes only at the block level as against byte level erase possible in PCM.
 \section{Conclusion and Future Work}
 \label{conclusion}
-Database query processing algorithms on Phase Change Memory calls for a change in perspective from the conventional algorithm design assumption of symmetric reads and writes. We demonstrate that with carefully designed algorithms, we can leverage the favourable performance of PCM \textit{reads} to cut down on not only the \textit{writes} but the running time as well. 
+Database query execution algorithms on Phase Change Memory calls for a change in perspective from the conventional algorithm design assumption of symmetric reads and writes. We demonstrate that with carefully designed algorithms, we can leverage the favourable performance of PCM \textit{reads} to cut down on not only the \textit{writes} but the running time as well. 
 
-Even within PCM friendly algorithms, there are a myriad of algorithm design choices available at varying degrees of writes and running time. Nested loops join, for example, would incur the least amount of writes for join when both relations fit in PCM, but might prove to be extremely slow. We need to come up with metrics that can quantify this trade-off based upon some measure of the lifetime that the PCM memory module is expected to serve and the maximum delay the user is willing to bear. We see this as an interesting line of future work.
-
-Secondly, most applications today run on multicore hardware. The DRAM in such hardware, like last level cache, is expected to be shared among all the cores. In that case, the availability of DRAM for a given application would be unpredictable. We need to design suitable eviction policies for DRAM such that there can be some degree of certainty about the amount of DRAM available for a core.
-
-
+Even within the class of PCM conscious algorithms, there exist myriad algorithm design choices offering varying degrees of writes and running time. Nested loops join, for example, would incur the least amount of writes for join when both relations fit in PCM, but might prove to be extremely slow. We need to come up with metrics that can quantify this trade-off based upon some measure of the lifetime that the PCM memory module is expected to serve and the maximum delay the user is willing to bear. We see this as an interesting line of future work.
 
 \section*{Acknowledgement}
 To be completed
